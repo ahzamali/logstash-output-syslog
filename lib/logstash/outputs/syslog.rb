@@ -126,7 +126,9 @@ class LogStash::Outputs::Syslog < LogStash::Outputs::Base
   config :msgid, :validate => :string, :default => "-"
 
   # syslog message format: you can choose between rfc3164 or rfc5424
-  config :rfc, :validate => ["rfc3164", "rfc5424"], :default => "rfc3164"
+  # forward-only use this option, when the system is receiving logs in standard format
+  # and just need forward
+  config :rfc, :validate => ["rfc3164", "rfc5424", "forward-only"], :default => "rfc3164"
 
   def register
     @client_socket = nil
@@ -144,6 +146,7 @@ class LogStash::Outputs::Syslog < LogStash::Outputs::Base
 
     # use instance variable to avoid string comparison for each event
     @is_rfc3164 = (@rfc == "rfc3164")
+    @is_forward_only = (@rfc == "forward-only")
   end
 
   def receive(event)
@@ -167,13 +170,18 @@ class LogStash::Outputs::Syslog < LogStash::Outputs::Base
       priority = 13 if (priority < 0 || priority > 191)
     end
 
-    if @is_rfc3164
-      timestamp = event.sprintf("%{+MMM dd HH:mm:ss}")
-      syslog_msg = "<#{priority.to_s}>#{timestamp} #{sourcehost} #{appname}[#{procid}]: #{message}"
+    # if it is forward only, do not add header, forward message with its original headers
+    if !@is_forward_only 
+      if @is_rfc3164
+        timestamp = event.sprintf("%{+MMM dd HH:mm:ss}")
+        syslog_msg = "<#{priority.to_s}>#{timestamp} #{sourcehost} #{appname}[#{procid}]: #{message}"
+      else
+        msgid = event.sprintf(@msgid)
+        timestamp = event.sprintf("%{+YYYY-MM-dd'T'HH:mm:ss.SSSZZ}")
+        syslog_msg = "<#{priority.to_s}>1 #{timestamp} #{sourcehost} #{appname} #{procid} #{msgid} - #{message}"
+      end
     else
-      msgid = event.sprintf(@msgid)
-      timestamp = event.sprintf("%{+YYYY-MM-dd'T'HH:mm:ss.SSSZZ}")
-      syslog_msg = "<#{priority.to_s}>1 #{timestamp} #{sourcehost} #{appname} #{procid} #{msgid} - #{message}"
+        syslog_msg = "#{message}"
     end
 
     begin
